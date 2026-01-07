@@ -1,4 +1,4 @@
 #ignore test.py and csv followed by test.py
 test.py
-*.pyc
+*.csv
 __pycache__
