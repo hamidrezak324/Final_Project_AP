@@ -7,8 +7,9 @@ from typing import List
 class Database:
     def __init__(self):
         self.users_file = "users.csv"
-        self._init_files()
         self.foods_file = "foods.csv"
+        self._init_files()
+
 
     def _init_files(self):
         """create the files if they don't exist"""
@@ -123,9 +124,12 @@ class Database:
         return ",".join([d.strftime("%Y-%m-%d") for d in dates_list])                
 
     def load_foods(self) -> pd.DataFrame:
-        df = pd.read_csv(self.foods_file)
+        df = pd.read_csv(self.foods_file, dtype= str)
         # parse the list of dates
         df['available_dates'] = df['available_dates'].apply(self._parse_dates)
+        df['selling_price'] = pd.to_numeric(df['selling_price'])
+        df['cost_price'] = pd.to_numeric(df['cost_price'])
+        df['stock'] = pd.to_numeric(df['stock'])
         return df
 
     def save_food(self, food: Food):
@@ -135,19 +139,20 @@ class Database:
         # for simplicity we assume that we always add it (the admin can manage it)
         
         food_data = {
-            'food_id': food.food_id,
-            'name': food.name,
-            'category': food.category,
-            'selling_price': food.selling_price,
-            'cost_price': food.cost_price,
-            'ingredients': food.ingredients,
-            'description': food.description,
-            'stock': food.stock,
+            'food_id': str(food.food_id),
+            'name': str(food.name),
+            'category': str(food.category),
+            'selling_price': float(food.selling_price),
+            'cost_price': float(food.cost_price),
+            'ingredients': str(food.ingredients),
+            'description': str(food.description),
+            'stock': int(food.stock),
             'available_dates': self._format_dates(food.available_dates),
-            'image_path': food.image_path
+            'image_path': str(food.image_path) if food.image_path else None
         }
-        
-        new_df = pd.concat([df, pd.DataFrame([food_data])], ignore_index=True)
+        cols = ['food_id', 'name', 'category', 'selling_price', 'cost_price', 
+                'ingredients', 'description', 'stock', 'available_dates', 'image_path']
+        new_df = pd.concat([df, pd.DataFrame([food_data], columns= cols)], ignore_index=True)
         new_df.to_csv(self.foods_file, index=False)
 
     def update_food_stock(self, food_id: str, new_stock: int):
