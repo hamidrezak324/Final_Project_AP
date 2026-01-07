@@ -1,0 +1,5 @@
+#ignore test.py and csv followed by test.py
+test.py
+foods.csv
+users.csv
+__pycache__
