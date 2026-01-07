@@ -1,3 +1,0 @@
-food_id,name,category,selling_price,cost_price,ingredients,description,stock,available_dates,image_path
-101,Ghormeh Sabzi,Main,150000.0,100000.0,"Herbs, Meat",Tasty stew,5,[],
-102,Doogh,Drink,20000.0,10000.0,Yogurt,Drink,10,[],
