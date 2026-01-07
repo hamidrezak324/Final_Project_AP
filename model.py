@@ -2,7 +2,6 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import List, Optional
 from datetime import datetime, date
-import uuid
 
 # -------------------------------------------------------
 # 1. User class (Abstraction & Inheritance)
@@ -22,6 +21,14 @@ class User(ABC):
     @property
     def full_name(self) -> str:
         return f"{self.first_name} {self.last_name}"
+
+    @property
+    def user_id(self) -> str:
+        return self._user_id
+    
+    @property
+    def password(self) -> str:
+        return self._password    
 
     @abstractmethod
     def get_role(self) -> str:
