@@ -1,11 +1,14 @@
 import pandas as pd
 import os
-from model import User, Customer, Admin
+from model import User, Food
+from datetime import datetime, date
+from typing import List
 
 class Database:
     def __init__(self):
         self.users_file = "users.csv"
         self._init_files()
+        self.foods_file = "foods.csv"
 
     def _init_files(self):
         """create the files if they don't exist"""
@@ -17,6 +20,12 @@ class Database:
                 'loyalty_points', 'failed_attempts', 'is_locked'
             ]
             pd.DataFrame(columns=cols).to_csv(self.users_file, index=False)
+        if not os.path.exists(self.foods_file):
+            cols = [
+                'food_id', 'name', 'category', 'selling_price', 'cost_price', 
+                'ingredients', 'description', 'stock', 'available_dates', 'image_path'
+            ]
+            pd.DataFrame(columns=cols).to_csv(self.foods_file, index=False)
 
     def load_users(self) -> pd.DataFrame:
         return pd.read_csv(self.users_file)
@@ -99,3 +108,51 @@ class Database:
         if user.empty:
             return None
         return user.iloc[0]    
+
+    def _parse_dates(self, date_str: str) -> List[date]:
+        if pd.isna(date_str) or date_str == "":
+            return []
+        try:
+            dates_str = date_str.split(',')
+            return [datetime.strptime(d.strip(), "%Y-%m-%d").date() for d in dates_str]
+        except:
+            return []
+
+    def _format_dates(self, dates_list: List[date]) ->str:
+        """convert the list of dates to a string"""  
+        return ",".join([d.strftime("%Y-%m-%d") for d in dates_list])                
+
+    def load_foods(self) -> pd.DataFrame:
+        df = pd.read_csv(self.foods_file)
+        # parse the list of dates
+        df['available_dates'] = df['available_dates'].apply(self._parse_dates)
+        return df
+
+    def save_food(self, food: Food):
+        df = self.load_foods()
+        
+        # if the food already exists update it, if not add it
+        # for simplicity we assume that we always add it (the admin can manage it)
+        
+        food_data = {
+            'food_id': food.food_id,
+            'name': food.name,
+            'category': food.category,
+            'selling_price': food.selling_price,
+            'cost_price': food.cost_price,
+            'ingredients': food.ingredients,
+            'description': food.description,
+            'stock': food.stock,
+            'available_dates': self._format_dates(food.available_dates),
+            'image_path': food.image_path
+        }
+        
+        new_df = pd.concat([df, pd.DataFrame([food_data])], ignore_index=True)
+        new_df.to_csv(self.foods_file, index=False)
+
+    def update_food_stock(self, food_id: str, new_stock: int):
+        df = self.load_foods()
+        index = df[df['food_id'] == food_id].index
+        if len(index) > 0:
+            df.at[index[0], 'stock'] = new_stock
+            df.to_csv(self.foods_file, index=False)
