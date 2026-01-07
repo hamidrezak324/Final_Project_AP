@@ -1,2 +1,0 @@
-order_id,customer_id,order_date,delivery_date,status,total_amount,discount_amount,payment_method,discount_code
-71191763-1a23-403f-a67a-2e07ecbb40c6,cust_1,2026-01-07 19:38:25,2026-01-07,Cancelled,450000.0,0.0,Online,
