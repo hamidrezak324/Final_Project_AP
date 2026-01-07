@@ -1,5 +1,4 @@
 #ignore test.py and csv followed by test.py
 test.py
-foods.csv
-users.csv
+*.pyc
 __pycache__
