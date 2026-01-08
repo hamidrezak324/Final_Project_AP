@@ -110,9 +110,9 @@ class OrderService:
         order_data = order_row.iloc[0]
         customer_id = order_data['customer_id']   
         total_before_discount = float(order_data['total_amount']) + float(order_data['discount_amount'])
-        customer_service = CustomerService()  # برای دسترسی به متد اضافه کردن امتیاز
+        customer_service = CustomerService()  
         customer_service.add_purchase_points(customer_id, total_before_discount)
-        print(f"the payment was successful. {points_earned} loyality points was added to {customer_id}.")
+        print(f"Payment successful. Loyalty points added to {customer_id}.")
         return True      
 
 

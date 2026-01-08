@@ -140,7 +140,7 @@ class Order:
     def apply_discount(self, discount_code_obj: 'DiscountCode'):
         if discount_code_obj.is_valid():
             self.discount_code = discount_code_obj.code
-            # محاسبه تخفیف روی مبلغ خام
+            # calculating discount due to base price
             self.discount_amount = self._total_amount * discount_code_obj.discount_percentage / 100
 
     def update_status(self, new_status: str):
