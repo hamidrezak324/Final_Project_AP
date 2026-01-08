@@ -179,3 +179,64 @@ class Database:
     def get_customer_orders(self, customer_id: str) -> pd.DataFrame:
         df = pd.read_csv(self.orders_file)
         return df[df['customer_id'] == customer_id].sort_values("order_date", ascending=False)
+    # --- Reviews ---
+    def save_review(self,review):
+        """save customer's reviews"""
+        df = pd.read_csv(self.reviews_file)
+        review_data = {
+            'review_id': review.review_id,
+            'customer_id': review.customer_id,
+            'order_id': review.order_id,
+            'rating': review.rating,
+            'comment': review.comment,
+            'review_date': review.review_date.strftime("%Y-%m-%d %H:%M:%S")
+        }  
+        pd.concat([df, pd.DataFrame([review_data])], ignore_index=True).to_csv(self.reviews_file, index=False)
+    def add_loyalty_points(self, customer_id: str, points: int):
+        """افزایش امتیاز وفاداری"""
+        df = self.load_users()
+        index = df[df['user_id'] == customer_id].index
+        if len(index) > 0:
+            df.at[index[0], 'loyalty_points'] += points
+            df.to_csv(self.users_file, index=False)
+    
+    def deduct_loyalty_points(self, customer_id: str, points: int):
+        """کسر امتیاز وفاداری (برای دریافت کد تخفیف)"""
+        df = self.load_users()
+        index = df[df['user_id'] == customer_id].index
+        if len(index) > 0:
+            current = int(df.at[index[0], 'loyalty_points'])
+            if current < points:
+                raise ValueError("امتیاز کافی نیست")
+            df.at[index[0], 'loyalty_points'] = current - points
+            df.to_csv(self.users_file, index=False)
+
+    def save_discount_code(self, discount_code):
+        """ذخیره کد تخفیف جدید"""
+        df = pd.read_csv(self.discount_codes_file)
+        code_data = {
+            'code': discount_code.code,
+            'discount_percentage': discount_code.discount_percentage,
+            'expiry_date': discount_code.expiry_date.strftime("%Y-%m-%d %H:%M:%S"),
+            'is_used': discount_code.is_used,
+            'customer_id': discount_code.customer_id or ""
+        }
+        pd.concat([df, pd.DataFrame([code_data])], ignore_index=True).to_csv(self.discount_codes_file, index=False)
+
+    def find_discount_code(self, code: str) -> Optional[pd.Series]:
+        """پیدا کردن کد تخفیف"""
+        df = pd.read_csv(self.discount_codes_file)
+        result = df[df['code'] == code]
+        return None if result.empty else result.iloc[0]
+
+    def mark_discount_code_used(self, code: str):
+        """علامت‌گذاری کد به عنوان استفاده شده"""
+        df = pd.read_csv(self.discount_codes_file)
+        index = df[df['code'] == code].index
+        if len(index) > 0:
+            df.at[index[0], 'is_used'] = True
+            df.to_csv(self.discount_codes_file, index=False)   
+    def get_reviews_by_order(self, order_id: str) -> pd.DataFrame:
+        """دریافت نظرات مربوط به یک سفارش"""
+        df = pd.read_csv(self.reviews_file)
+        return df[df['order_id'] == order_id]                

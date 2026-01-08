@@ -1,10 +1,11 @@
 import uuid
 from datetime import date, datetime
 from typing import Optional
-
+import pandas as pd
 from model import Order, Cart, DiscountCode
 from database import Database
 from food_service import FoodService
+from customer_service import CustomerService
 
 
 class OrderService:
@@ -98,8 +99,24 @@ class OrderService:
         Simulate payment processing.
         In a real application, this would integrate with a payment gateway.
         """
+        #1. change the situation of the order
         self.db.update_order_status(order_id, Order.STATUS_PAID)
-        return True
+        #2. read user id to find total amount
+        orders_df = pd.read_csv(self.db.orders_file)
+        order_row = orders_df[orders_df['order_id'] == order_id]
+        if order_row.empty:
+            raise ValueError(f"Order with ID {order_id} not found")
+
+        order_data = order_row.iloc[0]
+        customer_id = order_data['customer_id']   
+        total_before_discount = float(order_data['total_amount']) + float(order_data['discount_amount'])
+        customer_service = CustomerService()  # برای دسترسی به متد اضافه کردن امتیاز
+        points_earned = int(total_before_discount // 1000)
+        if points_earned > 0:
+            customer_service.add_purchase_points(customer_id, total_before_discount)  
+        print(f"the payment was successful. {points_earned} loyality points was added to {customer_id}.")
+        return True      
+
 
     def cancel_order(self, order_id: str):
         """
