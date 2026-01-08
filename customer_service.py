@@ -12,11 +12,9 @@ class CustomerService:
     # Order History
     # -------------------------------------------------------
     def get_order_history(self, customer_id: str) -> List[dict]:
-        """
-        دریافت لیست سفارشات مشتری به همراه جزئیات.
-        نکته: قیمت‌ها باید همان زمان خرید باشند (ثابت شده).
-        """
+        """Get customer order history with details"""
         orders_df = self.db.get_customer_orders(customer_id)
+        foods_df = self.db.load_foods()
         history = []
 
         for _, order_row in orders_df.iterrows():
@@ -26,8 +24,10 @@ class CustomerService:
             # ساخت لیستی از جزئیات غذاها برای نمایش
             items_details = []
             for _, item_row in items_df.iterrows():
+                food = foods_df[foods_df['food_id'] == item_row['food_id']]
+                food_name = food.iloc[0]['name'] if not food.empty else item_row['food_id']
                 items_details.append({
-                    'food_name': item_row['food_id'], # نام غذا را می‌توان از روی food_id گرفتن (ساده‌سازی)
+                    'food_name': food_name, 
                     'quantity': int(item_row['quantity']),
                     'unit_price': float(item_row['unit_price']),
                     'total': int(item_row['quantity']) * float(item_row['unit_price'])
@@ -48,11 +48,17 @@ class CustomerService:
     # Reviews
     # -------------------------------------------------------
     def submit_review(self, customer_id: str, order_id: str, rating: int, comment: str):
-        """ثبت نظر برای یک سفارش"""
-        # بررسی اینکه آیا قبلاً نظر داده است یا خیر (اختیاری ولی خوب است)
-        existing = self.db.get_reviews_by_order(order_id)
-        # اگر بخواهیم فقط یک نظر مجاز باشد:
-        # if not existing.empty: raise ValueError("شما قبلاً برای این سفارش نظر ثبت کرده‌اید.")
+        """Submit review for an order"""
+        order_row = self.db.get_order_by_id(order_id)  # نیاز به متد جدید
+        if order_row is None:
+            raise ValueError("Order not found")
+        
+        if order_row['customer_id'] != customer_id:
+            raise ValueError("You can only review your own orders")
+        
+        # 2. Check rating range
+        if rating < 1 or rating > 5:
+            raise ValueError("Rating must be between 1 and 5")
 
         review = Review(
             review_id=str(uuid.uuid4()),

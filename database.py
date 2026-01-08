@@ -179,6 +179,13 @@ class Database:
     def get_customer_orders(self, customer_id: str) -> pd.DataFrame:
         df = pd.read_csv(self.orders_file)
         return df[df['customer_id'] == customer_id].sort_values("order_date", ascending=False)
+    def get_order_by_id(self, order_id: str) -> Optional[pd.Series]:
+        """Get a specific order by ID"""
+        df = pd.read_csv(self.orders_file)
+        order = df[df['order_id'] == order_id]
+        if order.empty:
+            return None
+        return order.iloc[0]
     # --- Reviews ---
     def save_review(self,review):
         """save customer's reviews"""
@@ -193,11 +200,12 @@ class Database:
         }  
         pd.concat([df, pd.DataFrame([review_data])], ignore_index=True).to_csv(self.reviews_file, index=False)
     def add_loyalty_points(self, customer_id: str, points: int):
-        """افزایش امتیاز وفاداری"""
+        """Add loyalty points to customer"""
         df = self.load_users()
         index = df[df['user_id'] == customer_id].index
         if len(index) > 0:
-            df.at[index[0], 'loyalty_points'] += points
+            current_points = int(df.at[index[0], 'loyalty_points'])
+            df.at[index[0], 'loyalty_points'] = current_points + points
             df.to_csv(self.users_file, index=False)
     
     def deduct_loyalty_points(self, customer_id: str, points: int):
