@@ -32,10 +32,17 @@ class OrderService:
         if not cart.items:
             raise ValueError("Cart is empty")
 
+        restaurant_ids = {item.food.restaurant_id for item in cart.items}
+        if len(restaurant_ids) > 1:
+            raise ValueError("تمام غذاهای سبد خرید باید از یک رستوران باشند")
+    
+        restaurant_id = list(restaurant_ids)[0] if restaurant_ids else "restaurant_001"
+
         # 1. Create a new order
         order_id = str(uuid.uuid4())
 
         new_order = Order(
+            restaurant_id=restaurant_id,
             order_id=order_id,
             customer_id=customer_id,
             items=cart.items,

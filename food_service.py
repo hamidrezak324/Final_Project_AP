@@ -20,6 +20,7 @@ class FoodService:
         """
         return Food(
             food_id=row['food_id'],
+            restaurant_id=row['restaurant_id'],
             name=row['name'],
             category=row['category'],
             selling_price=float(row['selling_price']),

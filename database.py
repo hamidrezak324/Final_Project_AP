@@ -29,8 +29,8 @@ class Database:
         # Foods table
         if not os.path.exists(self.foods_file):
             cols = [
-                'food_id', 'name', 'category', 'selling_price', 'cost_price',
-                'ingredients', 'description', 'stock', 'available_dates', 'image_path'
+            'food_id', 'restaurant_id', 'name', 'category', 'selling_price', 'cost_price',
+            'ingredients', 'description', 'stock', 'available_dates', 'image_path'
             ]
             pd.DataFrame(columns=cols).to_csv(self.foods_file, index=False)
 
@@ -169,6 +169,7 @@ class Database:
         df = self.load_foods()
         food_data = {
             'food_id': str(food.food_id),
+            'restaurant_id': str(food.restaurant_id),
             'name': str(food.name),
             'category': str(food.category),
             'selling_price': float(food.selling_price),
@@ -180,14 +181,8 @@ class Database:
             'image_path': str(food.image_path) if food.image_path else None
         }
 
-        cols = [
-            'food_id', 'name', 'category', 'selling_price', 'cost_price',
-            'ingredients', 'description', 'stock',
-            'available_dates', 'image_path'
-        ]
-
         pd.concat(
-            [df, pd.DataFrame([food_data], columns=cols)],
+            [df, pd.DataFrame([food_data])],
             ignore_index=True
         ).to_csv(self.foods_file, index=False)
 
@@ -199,13 +194,14 @@ class Database:
             df = pd.read_csv(self.orders_file)
         else:
             df = pd.DataFrame(columns=[
-                'order_id', 'customer_id', 'order_date', 'delivery_date',
-                'status', 'total_amount', 'discount_amount',
-                'payment_method', 'discount_code'
+                    'order_id', 'restaurant_id', 'customer_id', 'order_date', 'delivery_date',
+                    'status', 'total_amount', 'discount_amount',
+                    'payment_method', 'discount_code'
             ])
 
         order_data = {
             'order_id': order.order_id,
+            'restaurant_id': order.restaurant_id, 
             'customer_id': order.customer_id,
             'order_date': order.order_date.strftime("%Y-%m-%d %H:%M:%S"),
             'delivery_date': order.delivery_date.strftime("%Y-%m-%d"),

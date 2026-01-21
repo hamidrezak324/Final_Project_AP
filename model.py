@@ -85,6 +85,7 @@ class Admin(User):
 @dataclass
 class Food:
     food_id: str
+    restaurant_id: str
     name: str
     category: str
     selling_price: float
@@ -121,7 +122,8 @@ class Order:
     PAYMENT_ONLINE = "Online"
     PAYMENT_CASH = "Cash on Delivery"
 
-    def __init__(self, order_id: str, customer_id: str, items: List[OrderItem], delivery_date: date ,payment_method: str = PAYMENT_ONLINE):
+    def __init__(self,  restaurant_id: str, order_id: str, customer_id: str, items: List[OrderItem], delivery_date: date ,payment_method: str = PAYMENT_ONLINE):
+        self.restaurant_id = restaurant_id
         self.order_id = order_id
         self.customer_id = customer_id
         self.items = items
