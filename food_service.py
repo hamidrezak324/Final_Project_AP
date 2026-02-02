@@ -29,8 +29,7 @@ class FoodService:
             description=row['description'],
             stock=int(row['stock']),
             # available_dates is already parsed as List[date] by the database
-            available_dates=row['available_dates'],
-            image_path=row['image_path']
+            available_dates=row['available_dates']
         )
 
     # -------------------------------------------------------

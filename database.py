@@ -116,7 +116,10 @@ class Database:
 
     def find_admin_by_personnel(self, personnel_id: str) -> Optional[pd.Series]:
         df = self.load_users()
-        admin = df[df['personnel_id'] == personnel_id]
+        df['personnel_id'] = df['personnel_id'].astype(str).str.strip()
+        # remove 0 from float
+        df['personnel_id'] = df['personnel_id'].str.replace(r'\.0$', '', regex=True)
+        admin = df[(df['personnel_id'] == str(personnel_id).strip()) & (df['role'] == 'Admin')]
         return None if admin.empty else admin.iloc[0]
 
     def update_user_profile(self, email: str, updated_fields: dict):

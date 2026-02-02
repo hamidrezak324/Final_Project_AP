@@ -1,6 +1,5 @@
 import uuid
 import pandas as pd
-import matplotlib.pyplot as plt
 from datetime import datetime, date, timedelta
 from typing import List
 from model import Food, DiscountCode, Order
@@ -180,7 +179,7 @@ class AdminService:
     # -------------------------------------------------------
     def create_discount_for_customer(self, customer_id: str, discount_percentage: float):
         """Admin creates a special discount code for a specific customer"""
-        if discount_percentage <= 0 or discount_percentage > 100:  # ✅ اضافه کن
+        if discount_percentage <= 0 or discount_percentage > 100:  
             raise ValueError("Discount percentage must be between 0 and 100")
         code = f"ADMIN-{uuid.uuid4().hex[:6].upper()}"
         
@@ -193,30 +192,3 @@ class AdminService:
         
         self.db.save_discount_code(discount)
         return discount
-    def plot_sales_chart(self, start_date, end_date):
-        """
-        the chart of sell and profit.
-        """
-        # getting data
-        report_data = self.get_sales_report(start_date, end_date)
-        
-        # extract amounts fot charts
-        labels = ['Total Sell (Toman)', 'Net Profit (Toman)']
-        values = [report_data['total_sales'], report_data['total_profit']]
-        
-        # Bar chart
-        plt.figure(figsize=(8, 5))
-        bars = plt.bar(labels, values, color=['skyblue', 'lightgreen'])
-        
-        # Adding title
-        plt.title(f'The report from {start_date} to {end_date}')
-        plt.ylabel('Toman')
-        
-        # Show the exact number
-        for bar in bars:
-            yval = bar.get_height()
-            plt.text(bar.get_x() + bar.get_width()/2, yval, int(yval), ha='center', va='bottom')
-        
-        # showing the chart
-        plt.tight_layout()
-        plt.show()    

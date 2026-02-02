@@ -2,24 +2,6 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import List, Optional
 from datetime import datetime, date
-import uuid
-
-# -------------------------------------------------------
-# Discount Code
-# -------------------------------------------------------
-
-@dataclass
-class DiscountCode:
-    """Discount code for customers"""
-    code: str
-    discount_percentage: float  
-    expiry_date: datetime
-    is_used: bool = False
-    customer_id: Optional[str] = None
-    
-    def is_valid(self) -> bool:
-        """Check if discount code is still valid"""
-        return not self.is_used and datetime.now() < self.expiry_date
 
 # -------------------------------------------------------
 # User Classes
@@ -69,14 +51,18 @@ class Customer(User):
         self.loyalty_points = loyalty_points
         self._cart: Optional['Cart'] = Cart()
 
-    def get_role(self) -> str: return "Customer"
-    def add_to_loyalty(self, points: int): self.loyalty_points += points
+    def get_role(self) -> str: 
+        return "Customer"
+    def add_to_loyalty(self, points: int): 
+        self.loyalty_points += points
 
 class Admin(User):
     def __init__(self, user_id: str, first_name: str, last_name: str, email: str, password: str, personnel_id: str):
         super().__init__(user_id, first_name, last_name, email, password)
         self.personnel_id = personnel_id
-    def get_role(self) -> str: return "Admin"
+
+    def get_role(self) -> str: 
+        return "Admin"
 
 # -------------------------------------------------------
 # Food & Order Classes
@@ -94,7 +80,6 @@ class Food:
     description: str
     stock: int
     available_dates: List[date] = field(default_factory=list)
-    image_path: Optional[str] = None
 
     def is_available(self, requested_quantity: int = 1) -> bool:
         return self.stock >= requested_quantity
@@ -122,7 +107,9 @@ class Order:
     PAYMENT_ONLINE = "Online"
     PAYMENT_CASH = "Cash on Delivery"
 
-    def __init__(self,  restaurant_id: str, order_id: str, customer_id: str, items: List[OrderItem], delivery_date: date ,payment_method: str = PAYMENT_ONLINE):
+    def __init__(self,  restaurant_id: str, order_id: str, customer_id: str, items: List[OrderItem]
+    , delivery_date: date ,payment_method: str = PAYMENT_ONLINE):
+    
         self.restaurant_id = restaurant_id
         self.order_id = order_id
         self.customer_id = customer_id
@@ -169,7 +156,9 @@ class Cart:
         self.items = [item for item in self.items if item.food.food_id != food_id]
     def clear(self): self.items = []
     def get_total(self) -> float: return sum(item.total_price for item in self.items)
-
+# -------------------------------------------------------
+# Review Code
+# -------------------------------------------------------
 @dataclass
 class Review:
     review_id: str
@@ -178,3 +167,19 @@ class Review:
     rating: int # up to 5
     comment: str
     review_date: datetime = field(default_factory=datetime.now)
+# -------------------------------------------------------
+# Discount Code
+# -------------------------------------------------------
+
+@dataclass
+class DiscountCode:
+    """Discount code for customers"""
+    code: str
+    discount_percentage: float  
+    expiry_date: datetime
+    is_used: bool = False
+    customer_id: Optional[str] = None
+    
+    def is_valid(self) -> bool:
+        """Check if discount code is still valid"""
+        return not self.is_used and datetime.now() < self.expiry_date

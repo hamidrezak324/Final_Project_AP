@@ -2,7 +2,16 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
 import sys
+import threading
+from threaded_scraper import ThreadedScraper
+from restaurant_scrapers import SnappFoodScraper
+from price_comparison import PriceComparator
 import os
+import pandas as pd
+import matplotlib
+matplotlib.use('TkAgg')   
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from datetime import datetime, date, timedelta
 
 # اضافه کردن مسیر فایل‌های پروژه به sys.path
@@ -33,6 +42,11 @@ class FoodDeliveryApp:
         self.customer_service = CustomerService()
         self.admin_service = AdminService()
         self.db = Database() 
+
+        # اسکرپرها و مقایسه‌گر قیمت
+        self.snappfood_scraper = SnappFoodScraper()
+        self.threaded_scraper = ThreadedScraper()
+        self.price_comparator = None
         
         # وضعیت کاربر
         self.current_user = None
@@ -246,6 +260,10 @@ class FoodDeliveryApp:
         menubar.add_cascade(label="امتیازات", menu=points_menu)
         points_menu.add_command(label="امتیازات من", command=self.show_loyalty_points)
         points_menu.add_command(label="تبدیل به کد تخفیف", command=self.convert_points)
+
+        review_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="نظرات", menu=review_menu)
+        review_menu.add_command(label="نظرات من", command=self.show_my_reviews)
         
         # صفحه خوش‌آمدگویی
         welcome_frame = ttk.Frame(self.root, padding=30)
@@ -383,17 +401,19 @@ class FoodDeliveryApp:
         tree_frame = ttk.Frame(self.root)
         tree_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        columns = ("نام غذا", "قیمت واحد", "تعداد", "قیمت کل")
+        columns = ("نام غذا", "قیمت واحد", "تعداد", "ویرایش تعداد", "قیمت کل")
         tree = ttk.Treeview(tree_frame, columns=columns, show="headings", height=10)
         
         tree.heading("نام غذا", text="نام غذا")
         tree.heading("قیمت واحد", text="قیمت واحد (تومان)")
         tree.heading("تعداد", text="تعداد")
+        tree.heading("ویرایش تعداد", text="ویرایش تعداد")
         tree.heading("قیمت کل", text="قیمت کل (تومان)")
         
         tree.column("نام غذا", width=200)
         tree.column("قیمت واحد", width=120)
         tree.column("تعداد", width=80)
+        tree.column("ویرایش تعداد", width=120)
         tree.column("قیمت کل", width=120)
         
         # اضافه کردن آیتم‌ها
@@ -405,6 +425,7 @@ class FoodDeliveryApp:
                 item.food.name,
                 f"{item.unit_price:,.0f}",
                 item.quantity,
+                "ویرایش",  
                 f"{item_total:,.0f}"
             ))
         
@@ -427,6 +448,8 @@ class FoodDeliveryApp:
         
         ttk.Button(btn_frame, text="حذف انتخاب شده", 
                   command=lambda: self.remove_from_cart(tree)).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="ویرایش تعداد انتخاب شده", 
+                  command=lambda: self.edit_quantity(tree)).pack(side=tk.LEFT, padx=5)          
         ttk.Button(btn_frame, text="تسویه حساب", 
                   command=self.checkout_dialog).pack(side=tk.LEFT, padx=5)
         ttk.Button(btn_frame, text="خالی کردن سبد", 
@@ -594,7 +617,7 @@ class FoodDeliveryApp:
     def show_order_detail(self, order):
         dialog = tk.Toplevel(self.root)
         dialog.title(f"جزییات سفارش {order['order_id']}")
-        dialog.geometry("600x500")
+        dialog.geometry("600x550")
         
         # نمایش اطلاعات سفارش
         info_frame = ttk.LabelFrame(dialog, text="اطلاعات سفارش", padding=10)
@@ -605,6 +628,8 @@ class FoodDeliveryApp:
         ttk.Label(info_frame, text=f"وضعیت: {order['status']}").pack(anchor=tk.W)
         ttk.Label(info_frame, text=f"مبلغ کل: {order['total_amount']:,.0f} تومان").pack(anchor=tk.W)
         ttk.Label(info_frame, text=f"مبلغ پرداختی: {order['final_amount']:,.0f} تومان").pack(anchor=tk.W)
+
+        can_review = order['status'] in ['Paid', 'Sent']
         
         # آیتم‌های سفارش
         items_frame = ttk.LabelFrame(dialog, text="آیتم‌های سفارش", padding=10)
@@ -632,6 +657,16 @@ class FoodDeliveryApp:
         
         tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        btn_frame = ttk.Frame(dialog)
+        btn_frame.pack(pady=10)
+        if can_review:
+            ttk.Button(btn_frame, text="ثبت نظر", 
+                  command=lambda: self.submit_review_dialog(order)).pack(side=tk.LEFT, padx=5)
+
+            reviews_df = self.db.get_reviews_by_order(order['order_id'])
+            if not reviews_df.empty:
+                ttk.Button(btn_frame, text="📋 نمایش نظرات", 
+                        command=lambda: self.show_order_reviews(order['order_id'])).pack(side=tk.LEFT, padx=5)      
         
         # دکمه بستن
         ttk.Button(dialog, text="بستن", 
@@ -734,6 +769,17 @@ class FoodDeliveryApp:
         admin_menu.add_command(label="گزارشات فروش", command=self.show_sales_reports)
         admin_menu.add_command(label="ایجاد کد تخفیف", command=self.create_admin_discount)
         
+        report_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="گزارشات", menu=report_menu)
+        report_menu.add_command(label="گزارش فروش و سود", command=self.create_sales_report_page)
+
+        scraping_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="📊 اسکرپ و مقایسه", menu=scraping_menu)
+        scraping_menu.add_command(label="اسکرپ قیمت‌های Snappfood", command=self.show_scraping_page)
+        scraping_menu.add_command(label="مقایسه قیمت با رقبا", command=self.show_price_comparison)
+        scraping_menu.add_command(label="نمایش نمودار مقایسه", command=self.show_comparison_chart)
+        scraping_menu.add_command(label="اسکرپ همزمان چند رستوران", command=self.show_multi_scraping)
+        
         # صفحه خوش‌آمدگویی ادمین
         welcome_frame = ttk.Frame(self.root, padding=30)
         welcome_frame.pack(fill=tk.BOTH, expand=True)
@@ -754,7 +800,8 @@ class FoodDeliveryApp:
                   command=self.show_order_management, width=20).pack(side=tk.LEFT, padx=10)
         ttk.Button(btn_frame, text="📊 گزارشات فروش", 
                   command=self.show_sales_reports, width=20).pack(side=tk.LEFT, padx=10)
-    
+        ttk.Button(btn_frame, text="🔍 مقایسه قیمت", 
+                  command=self.show_price_comparison, width=20).pack(side=tk.LEFT, padx=10)
     def show_admin_profile(self):
         messagebox.showinfo("پروفایل ادمین", 
                           f"نام: {self.current_user.full_name}\n"
@@ -1277,7 +1324,7 @@ class FoodDeliveryApp:
                 
                 # دکمه رسم نمودار
                 ttk.Button(report_window, text="📈 رسم نمودار", 
-                          command=lambda: self.admin_service.plot_sales_chart(start_date, end_date)).pack(pady=10)
+                          command=self.show_sales_and_profit_chart).pack(pady=10)
                 
             except ValueError as e:
                 messagebox.showerror("خطا", "تاریخ نامعتبر است")
@@ -1321,6 +1368,845 @@ class FoodDeliveryApp:
         self.user_role = None
         self.cart = Cart()
         self.create_login_page()
+
+    def edit_quantity(self, tree=None):
+        """ویرایش تعداد غذا در سبد خرید"""
+        if tree is None:
+            tree = self.cart_tree
+        
+        selected_item = tree.selection()
+        if not selected_item:
+            messagebox.showwarning("خطا", "لطفاً یک آیتم از سبد خرید انتخاب کنید")
+            return
+        
+        item_values = tree.item(selected_item[0])['values']
+        food_name = item_values[0]
+        current_quantity = int(item_values[2])  # مقدار فعلی
+        
+        # پیدا کردن food_id
+        food_id = None
+        for item in self.cart.items:
+            if item.food.name == food_name:
+                food_id = item.food.food_id
+                food_obj = item.food
+                break
+        
+        if not food_id:
+            messagebox.showerror("خطا", "غذا در سبد خرید پیدا نشد")
+            return
+        
+        # دیالوگ برای دریافت تعداد جدید
+        dialog = tk.Toplevel(self.root)
+        dialog.title(f"ویرایش تعداد {food_name}")
+        dialog.geometry("300x200")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        ttk.Label(dialog, text=f"ویرایش تعداد '{food_name}'", 
+                 font=self.title_font).pack(pady=10)
+        
+        ttk.Label(dialog, text=f"موجودی: {food_obj.stock}").pack(pady=5)
+        ttk.Label(dialog, text=f"تعداد فعلی: {current_quantity}").pack(pady=5)
+        
+        # Spinbox برای انتخاب تعداد
+        quantity_var = tk.IntVar(value=current_quantity)
+        spinbox = ttk.Spinbox(
+            dialog, 
+            from_=1, 
+            to=food_obj.stock, 
+            textvariable=quantity_var,
+            width=10,
+            font=self.font
+        )
+        spinbox.pack(pady=10)
+        
+        def update_quantity():
+            new_quantity = quantity_var.get()
+            
+            if new_quantity <= 0:
+                messagebox.showerror("خطا", "تعداد باید بیشتر از صفر باشد")
+                return
+            
+            try:
+                # به‌روزرسانی تعداد در سبد خرید
+                self.food_service.update_cart_item_quantity(
+                    self.cart, 
+                    food_id, 
+                    new_quantity
+                )
+                
+                messagebox.showinfo("موفقیت", f"تعداد {food_name} به {new_quantity} تغییر کرد")
+                dialog.destroy()
+                self.show_cart()  # بازنشانی صفحه سبد خرید
+                
+            except ValueError as e:
+                messagebox.showerror("خطا", str(e))
+        
+        # دکمه‌ها
+        btn_frame = ttk.Frame(dialog)
+        btn_frame.pack(pady=20)
+        
+        ttk.Button(btn_frame, text="بروزرسانی", 
+                  command=update_quantity, width=12).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="انصراف", 
+                  command=dialog.destroy, width=12).pack(side=tk.LEFT, padx=5)   
+
+
+    def submit_review_dialog(self, order):
+        """دیالوگ ثبت نظر برای سفارش"""
+        dialog = tk.Toplevel(self.root)
+        dialog.title(f"ثبت نظر برای سفارش {order['order_id'][:10]}...")
+        dialog.geometry("400x400")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        # عنوان
+        ttk.Label(dialog, text="ثبت نظر و امتیازدهی", 
+                 font=self.title_font).pack(pady=10)
+        
+        # انتخاب غذا برای ثبت نظر (اختیاری)
+        ttk.Label(dialog, text="انتخاب غذا (اختیاری):", 
+                 font=self.font).pack(pady=5, anchor=tk.W, padx=10)
+        
+        food_var = tk.StringVar(value="همه غذاها")
+        food_combo = ttk.Combobox(dialog, textvariable=food_var, 
+                                 width=30, font=self.font, state="readonly")
+        food_items = ["همه غذاها"] + [item['food_name'] for item in order['items']]
+        food_combo['values'] = food_items
+        food_combo.pack(pady=5, padx=10, fill=tk.X)
+        
+        # امتیازدهی
+        ttk.Label(dialog, text="امتیاز (۱ تا ۵):", 
+                 font=self.font).pack(pady=10, anchor=tk.W, padx=10)
+        
+        rating_frame = ttk.Frame(dialog)
+        rating_frame.pack(pady=5, padx=10, fill=tk.X)
+        
+        rating_var = tk.IntVar(value=5)
+        
+        for i in range(1, 6):
+            ttk.Radiobutton(rating_frame, text=str(i), 
+                          variable=rating_var, value=i).pack(side=tk.LEFT, padx=5)
+        
+        # نظر
+        ttk.Label(dialog, text="نظر شما:", 
+                 font=self.font).pack(pady=10, anchor=tk.W, padx=10)
+        
+        comment_text = tk.Text(dialog, height=6, width=40, font=self.font)
+        comment_text.pack(pady=5, padx=10, fill=tk.BOTH, expand=True)
+        
+        # تابع ثبت نظر
+        def submit_review():
+            try:
+                food_name = food_var.get()
+                if food_name == "همه غذاها":
+                    food_name = None
+                
+                rating = rating_var.get()
+                comment = comment_text.get("1.0", tk.END).strip()
+                
+                if not comment:
+                    if messagebox.askokcancel("تأیید", 
+                                            "آیا مطمئن هستید که می‌خواهید نظر بدون متن ثبت کنید؟"):
+                        comment = "بدون نظر"
+                    else:
+                        return
+                
+                # ثبت نظر
+                self.customer_service.submit_review(
+                    customer_id=self.current_user.user_id,
+                    order_id=order['order_id'],
+                    rating=rating,
+                    comment=f"{'برای ' + food_name + ': ' if food_name else ''}{comment}"
+                )
+                
+                messagebox.showinfo("موفقیت", "نظر شما با موفقیت ثبت شد")
+                dialog.destroy()
+                
+            except ValueError as e:
+                messagebox.showerror("خطا", str(e))
+            except Exception as e:
+                messagebox.showerror("خطا", f"خطا در ثبت نظر: {str(e)}")
+        
+        # دکمه‌ها
+        btn_frame = ttk.Frame(dialog)
+        btn_frame.pack(pady=15)
+        
+        ttk.Button(btn_frame, text="ثبت نظر", 
+                  command=submit_review, width=15).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="انصراف", 
+                  command=dialog.destroy, width=15).pack(side=tk.LEFT, padx=5) 
+
+
+    def show_order_reviews(self, order_id):
+        """نمایش نظرات ثبت شده برای یک سفارش"""
+        # دریافت نظرات از دیتابیس
+        reviews_df = self.db.get_reviews_by_order(order_id)
+        
+        if reviews_df.empty:
+            messagebox.showinfo("نظرات", "هنوز نظری برای این سفارش ثبت نشده است")
+            return
+        
+        # ایجاد پنجره نمایش نظرات
+        dialog = tk.Toplevel(self.root)
+        dialog.title(f"نظرات سفارش {order_id[:10]}...")
+        dialog.geometry("500x400")
+        
+        # Treeview برای نمایش نظرات
+        tree_frame = ttk.Frame(dialog)
+        tree_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        columns = ("امتیاز", "نظر", "تاریخ")
+        tree = ttk.Treeview(tree_frame, columns=columns, show="headings", height=10)
+        
+        tree.heading("امتیاز", text="امتیاز")
+        tree.heading("نظر", text="نظر")
+        tree.heading("تاریخ", text="تاریخ")
+        
+        tree.column("امتیاز", width=80)
+        tree.column("نظر", width=300)
+        tree.column("تاریخ", width=100)
+        
+        for _, row in reviews_df.iterrows():
+            # تبدیل امتیاز به ستاره
+            stars = "★" * int(row['rating']) + "☆" * (5 - int(row['rating']))
+            
+            tree.insert("", tk.END, values=(
+                stars,
+                row['comment'][:50] + "..." if len(row['comment']) > 50 else row['comment'],
+                row['review_date'][:10]
+            ))
+        
+        scrollbar = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=tree.yview)
+        tree.configure(yscrollcommand=scrollbar.set)
+        
+        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # دکمه بستن
+        ttk.Button(dialog, text="بستن", 
+                  command=dialog.destroy).pack(pady=10)
+
+
+    def show_my_reviews(self):
+        """نمایش تمام نظرات ثبت شده توسط کاربر"""
+        self.clear_window()
+        
+        top_frame = ttk.Frame(self.root)
+        top_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        ttk.Button(top_frame, text="بازگشت", 
+                  command=self.create_customer_dashboard).pack(side=tk.LEFT)
+        
+        ttk.Label(top_frame, text="نظرات من", 
+                 font=self.title_font).pack(side=tk.LEFT, padx=20)
+        
+        # دریافت تمام نظرات کاربر
+        reviews_df = pd.read_csv(self.db.reviews_file)
+        user_reviews = reviews_df[reviews_df['customer_id'] == self.current_user.user_id]
+        
+        if user_reviews.empty:
+            ttk.Label(self.root, text="شما هنوز نظری ثبت نکرده‌اید", 
+                     font=self.font).pack(pady=50)
+            return
+        
+        # Treeview برای نمایش نظرات
+        tree_frame = ttk.Frame(self.root)
+        tree_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        columns = ("سفارش", "امتیاز", "نظر", "تاریخ")
+        tree = ttk.Treeview(tree_frame, columns=columns, show="headings", height=15)
+        
+        tree.heading("سفارش", text="کد سفارش")
+        tree.heading("امتیاز", text="امتیاز")
+        tree.heading("نظر", text="نظر")
+        tree.heading("تاریخ", text="تاریخ")
+        
+        tree.column("سفارش", width=120)
+        tree.column("امتیاز", width=80)
+        tree.column("نظر", width=250)
+        tree.column("تاریخ", width=100)
+        
+        for _, row in user_reviews.iterrows():
+            # تبدیل امتیاز به ستاره
+            stars = "★" * int(row['rating']) + "☆" * (5 - int(row['rating']))
+            
+            tree.insert("", tk.END, values=(
+                row['order_id'][:10] + "...",
+                stars,
+                row['comment'][:40] + "..." if len(row['comment']) > 40 else row['comment'],
+                row['review_date'][:10]
+            ))
+        
+        scrollbar = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=tree.yview)
+        tree.configure(yscrollcommand=scrollbar.set)
+        
+        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)   
+
+    def create_sales_report_page(self):
+        self.clear_window()
+        
+        main_frame = ttk.Frame(self.root, padding=20)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        ttk.Label(main_frame, text="گزارش فروش و سود", font=self.title_font).pack(pady=15)
+        
+        # ── ورودی تاریخ ────────────────────────────────
+        date_frame = ttk.Frame(main_frame)
+        date_frame.pack(fill=tk.X, pady=10)
+        
+        ttk.Label(date_frame, text="از تاریخ (YYYY-MM-DD):").pack(side=tk.LEFT, padx=5)
+        self.start_date_entry = ttk.Entry(date_frame, width=15)
+        self.start_date_entry.pack(side=tk.LEFT, padx=5)
+        self.start_date_entry.insert(0, (date.today() - timedelta(days=30)).strftime("%Y-%m-%d"))
+        
+        ttk.Label(date_frame, text="تا تاریخ (YYYY-MM-DD):").pack(side=tk.LEFT, padx=20)
+        self.end_date_entry = ttk.Entry(date_frame, width=15)
+        self.end_date_entry.pack(side=tk.LEFT, padx=5)
+        self.end_date_entry.insert(0, date.today().strftime("%Y-%m-%d"))
+        
+        # دکمه نمایش
+        ttk.Button(
+            main_frame, 
+            text="نمایش گزارش و نمودار", 
+            command=self.show_sales_and_profit_chart,
+            width=25
+        ).pack(pady=15)
+        
+        # جایی که نمودار قرار می‌گیرد
+        self.chart_frame = ttk.Frame(main_frame)
+        self.chart_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+        
+        # دکمه بازگشت
+        ttk.Button(main_frame, text="بازگشت به داشبورد", 
+                command=self.create_admin_dashboard).pack(pady=10)         
+
+    def show_sales_and_profit_chart(self):
+        try:
+            start_str = self.start_date_entry.get().strip()
+            end_str   = self.end_date_entry.get().strip()
+            
+            start_date = datetime.strptime(start_str, "%Y-%m-%d").date()
+            end_date   = datetime.strptime(end_str,   "%Y-%m-%d").date()
+            
+            if start_date > end_date:
+                messagebox.showerror("خطا", "تاریخ شروع نمی‌تواند بعد از تاریخ پایان باشد")
+                return
+                
+            # گرفتن داده‌ها از سرویس
+            report = self.admin_service.get_sales_report(start_date, end_date)
+            
+            # خلاصه متنی (اختیاری)
+            summary_text = (
+                f"تعداد سفارش‌ها: {report['order_count']}\n"
+                f"جمع فروش: {report['total_sales']:,.0f} تومان\n"
+                f"جمع سود: {report['total_profit']:,.0f} تومان"
+            )
+            messagebox.showinfo("خلاصه گزارش", summary_text)   # یا در لیبل نمایش بده
+            
+            # ── رسم نمودار ────────────────────────────────
+            fig = Figure(figsize=(7, 4), dpi=100)
+            ax = fig.add_subplot(111)
+            
+            categories = ['فروش کل', 'سود خالص']
+            values = [report['total_sales'], report['total_profit']]
+            colors = ['#4e79a7', '#76b7b2']
+            
+            bars = ax.bar(categories, values, color=colors, width=0.5)
+            
+            ax.set_title(f"گزارش فروش و سود\nاز {start_str} تا {end_str}", fontsize=12)
+            ax.set_ylabel("مبلغ (تومان)", fontsize=10)
+            ax.grid(axis='y', linestyle='--', alpha=0.7)
+            
+            # نمایش عدد روی ستون‌ها
+            for bar in bars:
+                height = bar.get_height()
+                ax.text(bar.get_x() + bar.get_width()/2, height,
+                        f"{int(height):,}", ha='center', va='bottom', fontsize=10)
+            
+            # حذف نمودار قبلی اگر وجود داشت
+            for widget in self.chart_frame.winfo_children():
+                widget.destroy()
+            
+            # نمایش نمودار در tkinter
+            canvas = FigureCanvasTkAgg(fig, master=self.chart_frame)
+            canvas.draw()
+            canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+            self.root.update_idletasks()       
+            self.chart_frame.update()
+            
+        except ValueError as e:
+            messagebox.showerror("خطا در تاریخ", f"فرمت تاریخ نامعتبر است\n{e}")
+        except Exception as e:
+            messagebox.showerror("خطا", f"مشکلی پیش آمد:\n{str(e)}")
+    # -------------------------------------------------------
+    # صفحات اسکرپ و مقایسه قیمت
+    # -------------------------------------------------------
+    
+    def show_scraping_page(self):
+        """صفحه اسکرپ قیمت‌های Snappfood"""
+        self.clear_window()
+        
+        top_frame = ttk.Frame(self.root)
+        top_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        ttk.Button(top_frame, text="بازگشت", 
+                  command=self.create_admin_dashboard).pack(side=tk.LEFT)
+        
+        ttk.Label(top_frame, text="اسکرپ قیمت‌های Snappfood", 
+                 font=self.title_font).pack(side=tk.LEFT, padx=20)
+        
+        # فریم اصلی
+        main_frame = ttk.Frame(self.root, padding=20)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # لینک رستوران
+        ttk.Label(main_frame, text="لینک رستوران در Snappfood:", 
+                 font=self.font).pack(anchor=tk.W, pady=5)
+        
+        url_frame = ttk.Frame(main_frame)
+        url_frame.pack(fill=tk.X, pady=5)
+        
+        self.scraping_url = ttk.Entry(url_frame, width=60, font=self.font)
+        self.scraping_url.pack(side=tk.LEFT, padx=5)
+        self.scraping_url.insert(0, "https://snappfood.ir/restaurant/menu/...")
+        
+        # وضعیت اسکرپ
+        self.scraping_status = tk.StringVar(value="آماده")
+        status_label = ttk.Label(main_frame, textvariable=self.scraping_status,
+                                font=("Tahoma", 11), foreground="blue")
+        status_label.pack(pady=10)
+        
+        # دکمه‌ها
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.pack(pady=20)
+        
+        ttk.Button(btn_frame, text="شروع اسکرپ", 
+                  command=self.start_scraping_thread, width=15).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="نمایش نتایج", 
+                  command=self.show_scraping_results, width=15).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="ذخیره به CSV", 
+                  command=self.save_scraping_results, width=15).pack(side=tk.LEFT, padx=5)
+        
+        # Treeview برای نمایش نتایج
+        tree_frame = ttk.Frame(main_frame)
+        tree_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+        
+        columns = ("نام غذا", "قیمت", "توضیحات", "تخفیف")
+        self.scraping_tree = ttk.Treeview(tree_frame, columns=columns, show="headings", height=10)
+        
+        for col in columns:
+            self.scraping_tree.heading(col, text=col)
+        
+        self.scraping_tree.column("نام غذا", width=150)
+        self.scraping_tree.column("قیمت", width=100)
+        self.scraping_tree.column("توضیحات", width=200)
+        self.scraping_tree.column("تخفیف", width=80)
+        
+        scrollbar = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=self.scraping_tree.yview)
+        self.scraping_tree.configure(yscrollcommand=scrollbar.set)
+        
+        self.scraping_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # ذخیره نتایج
+        self.scraped_items = []
+    
+    def start_scraping_thread(self):
+        """شروع اسکرپ در یک thread جداگانه"""
+        url = self.scraping_url.get().strip()
+        if not url:
+            messagebox.showwarning("خطا", "لطفا لینک رستوران را وارد کنید")
+            return
+        
+        self.scraping_status.set("در حال اسکرپ... لطفا صبر کنید")
+        
+        # استفاده از thread برای جلوگیری از فریز شدن GUI
+        def scraping_task():
+            try:
+                items = self.snappfood_scraper.scrape_menu(url)
+                self.scraped_items = items
+                
+                # به‌روزرسانی GUI از thread اصلی
+                self.root.after(0, self.update_scraping_results, items)
+                
+            except Exception as e:
+                self.root.after(0, lambda: self.scraping_status.set(f"خطا: {str(e)}"))
+        
+        threading.Thread(target=scraping_task, daemon=True).start()
+    
+    def update_scraping_results(self, items):
+        """به‌روزرسانی Treeview با نتایج اسکرپ"""
+        # پاک کردن موارد قبلی
+        for item in self.scraping_tree.get_children():
+            self.scraping_tree.delete(item)
+        
+        # اضافه کردن موارد جدید
+        for item in items:
+            self.scraping_tree.insert("", tk.END, values=(
+                item['food_name'],
+                f"{item['price']:,}",
+                item.get('description', ''),
+                item.get('discount', '0%')
+            ))
+        
+        self.scraping_status.set(f"اسکرپ کامل شد. {len(items)} آیتم یافت شد.")
+    
+    def show_scraping_results(self):
+        """نمایش نتایج اسکرپ"""
+        if not self.scraped_items:
+            messagebox.showinfo("نتایج", "هیچ داده‌ای برای نمایش وجود ندارد")
+            return
+        
+        result_text = f"تعداد غذاهای یافت شده: {len(self.scraped_items)}\n\n"
+        for item in self.scraped_items[:10]:  # فقط 10 مورد اول
+            result_text += f"• {item['food_name']}: {item['price']:,} تومان\n"
+        
+        messagebox.showinfo("نتایج اسکرپ", result_text)
+    
+    def save_scraping_results(self):
+        """ذخیره نتایج اسکرپ به فایل CSV"""
+        if not self.scraped_items:
+            messagebox.showwarning("خطا", "هیچ داده‌ای برای ذخیره وجود ندارد")
+            return
+        
+        try:
+            # تبدیل به DataFrame
+            df = pd.DataFrame(self.scraped_items)
+            
+            # ذخیره با زمان فعلی
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"snappfood_scraped_{timestamp}.csv"
+            
+            df.to_csv(filename, index=False, encoding='utf-8-sig')
+            messagebox.showinfo("موفقیت", f"نتایج در فایل {filename} ذخیره شد")
+            
+        except Exception as e:
+            messagebox.showerror("خطا", f"خطا در ذخیره فایل: {str(e)}")
+    
+    def show_price_comparison(self):
+        """صفحه مقایسه قیمت با رقبا"""
+        self.clear_window()
+        
+        top_frame = ttk.Frame(self.root)
+        top_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        ttk.Button(top_frame, text="بازگشت", 
+                  command=self.create_admin_dashboard).pack(side=tk.LEFT)
+        
+        ttk.Label(top_frame, text="مقایسه قیمت با رقبا", 
+                 font=self.title_font).pack(side=tk.LEFT, padx=20)
+        
+        # فریم اصلی
+        main_frame = ttk.Frame(self.root, padding=20)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # انتخاب فایل‌ها
+        ttk.Label(main_frame, text="فایل قیمت‌های ما:", 
+                 font=self.font).pack(anchor=tk.W, pady=5)
+        
+        our_file_frame = ttk.Frame(main_frame)
+        our_file_frame.pack(fill=tk.X, pady=5)
+        
+        self.our_prices_file = ttk.Entry(our_file_frame, width=40, font=self.font)
+        self.our_prices_file.pack(side=tk.LEFT, padx=5)
+        self.our_prices_file.insert(0, "our_prices.csv")
+        
+        ttk.Button(our_file_frame, text="انتخاب فایل", 
+                  command=self.select_our_file).pack(side=tk.LEFT, padx=5)
+        
+        ttk.Label(main_frame, text="فایل قیمت‌های رقبا:", 
+                 font=self.font).pack(anchor=tk.W, pady=10)
+        
+        comp_file_frame = ttk.Frame(main_frame)
+        comp_file_frame.pack(fill=tk.X, pady=5)
+        
+        self.comp_prices_file = ttk.Entry(comp_file_frame, width=40, font=self.font)
+        self.comp_prices_file.pack(side=tk.LEFT, padx=5)
+        self.comp_prices_file.insert(0, "competitor_prices.csv")
+        
+        ttk.Button(comp_file_frame, text="انتخاب فایل", 
+                  command=self.select_comp_file).pack(side=tk.LEFT, padx=5)
+        
+        # دکمه‌ها
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.pack(pady=20)
+        
+        ttk.Button(btn_frame, text="بارگذاری و مقایسه", 
+                  command=self.load_and_compare, width=20).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="نمایش گزارش", 
+                  command=self.show_comparison_report, width=20).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="ذخیره گزارش", 
+                  command=self.save_comparison_report, width=20).pack(side=tk.LEFT, padx=5)
+        
+        # وضعیت
+        self.comparison_status = tk.StringVar(value="آماده")
+        status_label = ttk.Label(main_frame, textvariable=self.comparison_status,
+                                font=("Tahoma", 11), foreground="blue")
+        status_label.pack(pady=10)
+    
+    def select_our_file(self):
+        """انتخاب فایل قیمت‌های ما"""
+        from tkinter import filedialog
+        filename = filedialog.askopenfilename(
+            title="فایل قیمت‌های ما را انتخاب کنید",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
+        )
+        if filename:
+            self.our_prices_file.delete(0, tk.END)
+            self.our_prices_file.insert(0, filename)
+    
+    def select_comp_file(self):
+        """انتخاب فایل قیمت‌های رقبا"""
+        from tkinter import filedialog
+        filename = filedialog.askopenfilename(
+            title="فایل قیمت‌های رقبا را انتخاب کنید",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
+        )
+        if filename:
+            self.comp_prices_file.delete(0, tk.END)
+            self.comp_prices_file.insert(0, filename)
+    
+    def load_and_compare(self):
+        """بارگذاری فایل‌ها و مقایسه قیمت"""
+        our_file = self.our_prices_file.get().strip()
+        comp_file = self.comp_prices_file.get().strip()
+        
+        if not our_file or not comp_file:
+            messagebox.showwarning("خطا", "لطفا هر دو فایل را انتخاب کنید")
+            return
+        
+        try:
+            # ایجاد مقایسه‌گر
+            self.price_comparator = PriceComparator(our_file, comp_file)
+            self.comparison_status.set("فایل‌ها با موفقیت بارگذاری شدند")
+            
+            # نمایش تعداد آیتم‌ها
+            our_count = len(pd.read_csv(our_file))
+            comp_count = len(pd.read_csv(comp_file))
+            
+            messagebox.showinfo("بارگذاری موفق", 
+                              f"قیمت‌های ما: {our_count} آیتم\n"
+                              f"قیمت‌های رقبا: {comp_count} آیتم\n"
+                              f"مقایسه‌گر آماده است.")
+            
+        except Exception as e:
+            messagebox.showerror("خطا", f"خطا در بارگذاری فایل‌ها: {str(e)}")
+    
+    def show_comparison_report(self):
+        """نمایش گزارش مقایسه"""
+        if not self.price_comparator:
+            messagebox.showwarning("خطا", "لطفا ابتدا فایل‌ها را بارگذاری کنید")
+            return
+        
+        try:
+            report = self.price_comparator.generate_comparison_report()
+            
+            if report.empty:
+                messagebox.showinfo("گزارش", "هیچ آیتم مشابهی برای مقایسه یافت نشد")
+                return
+            
+            # نمایش در Treeview جدید
+            self.show_report_in_window(report)
+            
+        except Exception as e:
+            messagebox.showerror("خطا", f"خطا در تولید گزارش: {str(e)}")
+    
+    def show_report_in_window(self, report_df):
+        """نمایش گزارش در پنجره جدید"""
+        report_window = tk.Toplevel(self.root)
+        report_window.title("گزارش مقایسه قیمت")
+        report_window.geometry("800x500")
+        
+        # Treeview
+        tree_frame = ttk.Frame(report_window)
+        tree_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        columns = ["غذا", "قیمت ما", "میانگین رقبا", "اختلاف", "درصد اختلاف", "وضعیت"]
+        tree = ttk.Treeview(tree_frame, columns=columns, show="headings", height=15)
+        
+        for col in columns:
+            tree.heading(col, text=col)
+        
+        tree.column("غذا", width=150)
+        tree.column("قیمت ما", width=100)
+        tree.column("میانگین رقبا", width=100)
+        tree.column("اختلاف", width=100)
+        tree.column("درصد اختلاف", width=100)
+        tree.column("وضعیت", width=100)
+        
+        for _, row in report_df.iterrows():
+            status_text = "ارزان‌تر" if row['price_difference'] < 0 else "گران‌تر"
+            status_color = "green" if row['price_difference'] < 0 else "red"
+            
+            tree.insert("", tk.END, values=(
+                row['our_food'],
+                f"{row['our_price']:,}",
+                f"{row['avg_competitor_price']:,}",
+                f"{row['price_difference']:,}",
+                f"{row['price_difference_percent']:.1f}%",
+                status_text
+            ))
+        
+        scrollbar = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=tree.yview)
+        tree.configure(yscrollcommand=scrollbar.set)
+        
+        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # جمع‌بندی
+        summary_frame = ttk.Frame(report_window)
+        summary_frame.pack(pady=10)
+        
+        cheaper_count = len(report_df[report_df['status'] == 'Cheaper'])
+        expensive_count = len(report_df[report_df['status'] == 'More Expensive'])
+        
+        ttk.Label(summary_frame, 
+                 text=f"ارزان‌تر: {cheaper_count} مورد | گران‌تر: {expensive_count} مورد",
+                 font=("Tahoma", 11, "bold")).pack()
+    
+    def save_comparison_report(self):
+        """ذخیره گزارش مقایسه"""
+        if not self.price_comparator:
+            messagebox.showwarning("خطا", "لطفا ابتدا فایل‌ها را بارگذاری کنید")
+            return
+        
+        try:
+            report = self.price_comparator.generate_comparison_report()
+            
+            if report.empty:
+                messagebox.showwarning("خطا", "هیچ داده‌ای برای ذخیره وجود ندارد")
+                return
+            
+            # ذخیره با زمان فعلی
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"price_comparison_{timestamp}.csv"
+            
+            report.to_csv(filename, index=False, encoding='utf-8-sig')
+            messagebox.showinfo("موفقیت", f"گزارش در فایل {filename} ذخیره شد")
+            
+        except Exception as e:
+            messagebox.showerror("خطا", f"خطا در ذخیره گزارش: {str(e)}")
+    
+    def show_comparison_chart(self):
+        """نمایش نمودار مقایسه قیمت"""
+        if not self.price_comparator:
+            messagebox.showwarning("خطا", "لطفا ابتدا فایل‌ها را بارگذاری کنید")
+            return
+        
+        try:
+            self.price_comparator.plot_price_comparison()
+        except Exception as e:
+            messagebox.showerror("خطا", f"خطا در رسم نمودار: {str(e)}")
+    
+    def show_multi_scraping(self):
+        """اسکرپ همزمان چند رستوران"""
+        self.clear_window()
+        
+        top_frame = ttk.Frame(self.root)
+        top_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        ttk.Button(top_frame, text="بازگشت", 
+                  command=self.create_admin_dashboard).pack(side=tk.LEFT)
+        
+        ttk.Label(top_frame, text="اسکرپ همزمان چند رستوران", 
+                 font=self.title_font).pack(side=tk.LEFT, padx=20)
+        
+        # فریم اصلی
+        main_frame = ttk.Frame(self.root, padding=20)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # لیست لینک‌ها
+        ttk.Label(main_frame, text="لینک‌های رستوران‌ها (هر لینک در یک خط):", 
+                 font=self.font).pack(anchor=tk.W, pady=5)
+        
+        self.urls_text = tk.Text(main_frame, width=70, height=10, font=self.font)
+        self.urls_text.pack(pady=5)
+        self.urls_text.insert("1.0", "https://snappfood.ir/restaurant/menu/...\nhttps://snappfood.ir/restaurant/menu/...")
+        
+        # وضعیت
+        self.multi_status = tk.StringVar(value="آماده")
+        status_label = ttk.Label(main_frame, textvariable=self.multi_status,
+                                font=("Tahoma", 11), foreground="blue")
+        status_label.pack(pady=10)
+        
+        # دکمه‌ها
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.pack(pady=20)
+        
+        ttk.Button(btn_frame, text="شروع اسکرپ همزمان", 
+                  command=self.start_multi_scraping, width=20).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="توقف همه اسکرپ‌ها", 
+                  command=self.stop_all_scraping, width=20).pack(side=tk.LEFT, padx=5)
+        
+        # نتایج
+        results_frame = ttk.LabelFrame(main_frame, text="نتایج", padding=10)
+        results_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+        
+        self.results_text = tk.Text(results_frame, width=70, height=15, font=self.font)
+        self.results_text.pack(fill=tk.BOTH, expand=True)
+    
+    def start_multi_scraping(self):
+        """شروع اسکرپ همزمان"""
+        urls_text = self.urls_text.get("1.0", tk.END).strip()
+        urls = [url.strip() for url in urls_text.split('\n') if url.strip()]
+        
+        if not urls:
+            messagebox.showwarning("خطا", "لطفا حداقل یک لینک وارد کنید")
+            return
+        
+        self.multi_status.set(f"در حال اسکرپ {len(urls)} رستوران...")
+        self.results_text.delete("1.0", tk.END)
+        
+        def scraping_task():
+            all_results = []
+            for i, url in enumerate(urls, 1):
+                try:
+                    # به‌روزرسانی وضعیت
+                    status = f"در حال اسکرپ رستوران {i} از {len(urls)}..."
+                    self.root.after(0, lambda s=status: self.multi_status.set(s))
+                    
+                    # اسکرپ
+                    items = self.snappfood_scraper.scrape_menu(url)
+                    
+                    # نمایش نتایج
+                    result_text = f"✅ رستوران {i}: {len(items)} آیتم یافت شد\n"
+                    for item in items[:3]:  # فقط 3 مورد اول
+                        result_text += f"   • {item['food_name'][:30]}...: {item['price']:,}\n"
+                    
+                    self.root.after(0, lambda t=result_text: self.results_text.insert(tk.END, t + "\n"))
+                    all_results.extend(items)
+                    
+                except Exception as e:
+                    error_text = f"❌ رستوران {i}: خطا - {str(e)}\n"
+                    self.root.after(0, lambda t=error_text: self.results_text.insert(tk.END, t))
+            
+            # پایان
+            self.root.after(0, lambda: self.multi_status.set(f"اسکرپ کامل شد. {len(all_results)} آیتم یافت شد."))
+            
+            # ذخیره تمام نتایج
+            if all_results:
+                try:
+                    df = pd.DataFrame(all_results)
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    filename = f"multi_scraped_{timestamp}.csv"
+                    df.to_csv(filename, index=False, encoding='utf-8-sig')
+                    
+                    self.root.after(0, lambda: self.results_text.insert(
+                        tk.END, f"\n📁 تمام نتایج در {filename} ذخیره شد\n"))
+                except Exception as e:
+                    self.root.after(0, lambda: self.results_text.insert(
+                        tk.END, f"\n❌ خطا در ذخیره: {str(e)}\n"))
+        
+        # اجرا در thread جداگانه
+        threading.Thread(target=scraping_task, daemon=True).start()
+    
+    def stop_all_scraping(self):
+        """توقف همه اسکرپ‌ها"""
+        # اینجا می‌توانید منطق توقف را اضافه کنید
+        self.multi_status.set("عملیات متوقف شد")
+        self.results_text.insert(tk.END, "\n🛑 عملیات توسط کاربر متوقف شد\n")            
 
 def main():
     root = tk.Tk()

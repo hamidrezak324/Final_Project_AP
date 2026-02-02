@@ -73,6 +73,9 @@ class CustomerService:
         )
         self.db.save_review(review)
 
+        points_for_review = 10 # points for each review
+        self.db.add_loyalty_points(customer_id, points_for_review)
+
     # -------------------------------------------------------
     # Loyalty Points & Discounts
     # -------------------------------------------------------

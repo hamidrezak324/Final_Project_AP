@@ -34,7 +34,7 @@ class OrderService:
 
         restaurant_ids = {item.food.restaurant_id for item in cart.items}
         if len(restaurant_ids) > 1:
-            raise ValueError("تمام غذاهای سبد خرید باید از یک رستوران باشند")
+            raise ValueError("all the orders should have been chose from a spicific restaurant")
     
         restaurant_id = list(restaurant_ids)[0] if restaurant_ids else "restaurant_001"
 
