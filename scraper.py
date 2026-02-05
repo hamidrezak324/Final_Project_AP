@@ -26,30 +26,30 @@ class BaseRestaurantScraper(ABC):
         
         chrome_options = Options()
         
-        # Headless mode (بدون باز کردن پنجره مرورگر)
+        # Headless mode 
         chrome_options.add_argument('--headless')
         chrome_options.add_argument('--disable-gpu')
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
         
-        # User-Agent برای جلوگیری از شناسایی به عنوان bot
+        # to prevent being detected as a bot
         chrome_options.add_argument(
             'user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
             'AppleWebKit/537.36 (KHTML, like Gecko) '
             'Chrome/120.0.0.0 Safari/537.36'
         )
         
-        # تنظیمات اضافی
+        # additional settings
         chrome_options.add_argument('--disable-blink-features=AutomationControlled')
         chrome_options.add_experimental_option('excludeSwitches', ['enable-logging'])
         chrome_options.add_experimental_option('useAutomationExtension', False)
         
-        # نصب و راه‌اندازی خودکار ChromeDriver
+        # install and initialize ChromeDriver automatically
         service = Service(ChromeDriverManager().install())
         
         self.driver = webdriver.Chrome(service=service, options=chrome_options)
         
-        # مخفی کردن ویژگی webdriver
+        # hide webdriver feature
         self.driver.execute_script(
             "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
         )
@@ -86,17 +86,17 @@ class BaseRestaurantScraper(ABC):
             print(f"🔄 Loading: {url}")
             self.driver.get(url)
             
-            # صبر برای لود شدن المان خاص (اگر مشخص شده باشد)
+            # wait for specific element to load (if specified)
             if wait_for_selector:
                 print(f"⏳ Waiting for element: {wait_for_selector}")
                 WebDriverWait(self.driver, wait_time).until(
                     EC.presence_of_element_located((By.CSS_SELECTOR, wait_for_selector))
                 )
             else:
-                # صبر کلی برای لود شدن صفحه
+                # wait for page to load
                 time.sleep(3)
             
-            # اسکرول کردن برای لود شدن lazy-loaded images
+            # scroll to load lazy-loaded images
             self._scroll_page()
             
             html = self.driver.page_source
@@ -105,45 +105,45 @@ class BaseRestaurantScraper(ABC):
             return html
             
         except Exception as e:
-            print(f"❌ Error fetching {url}: {e}")
+            print(f"Error fetching {url}: {e}")
             return ""
     
     def _scroll_page(self):
         """Scroll page to load lazy-loaded content"""
         try:
-            # اسکرول تدریجی به پایین صفحه
+            # scroll gradually to the bottom of the page
             last_height = self.driver.execute_script("return document.body.scrollHeight")
             
             while True:
-                # اسکرول به پایین
+                # scroll to the bottom
                 self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
                 time.sleep(1)
                 
-                # محاسبه ارتفاع جدید
+                # calculate new height
                 new_height = self.driver.execute_script("return document.body.scrollHeight")
                 
-                # اگر ارتفاع تغییر نکرد، یعنی به انتهای صفحه رسیدیم
+                # if height didn't change, we've reached the end of the page
                 if new_height == last_height:
                     break
                     
                 last_height = new_height
             
-            # اسکرول به بالا
+            # scroll to the top
             self.driver.execute_script("window.scrollTo(0, 0);")
             time.sleep(0.5)
             
         except Exception as e:
-            print(f"⚠️ Scroll error (non-critical): {e}")
+            print(f"Scroll error (non-critical): {e}")
     
     def save_to_csv(self, data: List[Dict], filename: str):
         """Save scraped data to CSV file"""
         if not data:
-            print("⚠️ No data to save")
+            print("No data to save")
             return
         
         df = pd.DataFrame(data)
         df.to_csv(filename, index=False, encoding='utf-8-sig')
-        print(f"✅ Data saved to {filename}")
+        print(f"Data saved to {filename}")
     
     def __del__(self):
         """Cleanup: close driver when object is destroyed"""

@@ -30,7 +30,7 @@ class Database:
         if not os.path.exists(self.foods_file):
             cols = [
             'food_id', 'restaurant_id', 'name', 'category', 'selling_price', 'cost_price',
-            'ingredients', 'description', 'stock', 'available_dates', 'image_path'
+            'ingredients', 'description', 'stock', 'available_dates'
             ]
             pd.DataFrame(columns=cols).to_csv(self.foods_file, index=False)
 
@@ -180,8 +180,7 @@ class Database:
             'ingredients': str(food.ingredients),
             'description': str(food.description),
             'stock': int(food.stock),
-            'available_dates': self._format_dates(food.available_dates),
-            'image_path': str(food.image_path) if food.image_path else None
+            'available_dates': self._format_dates(food.available_dates)
         }
 
         pd.concat(
